@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Kamera Refleks Oyunu</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#101321;color:#fff;font-family:system-ui,sans-serif;text-align:center;padding:14px}
+main{max-width:560px;margin:auto}h1{font-size:1.45rem;margin:8px}p{color:#d6d9e8;font-size:.95rem}
+button{border:0;border-radius:12px;padding:13px 18px;font-size:1rem;font-weight:800;background:#65e6d1;color:#101321;margin:5px}
+#stage{position:relative;width:100%;aspect-ratio:3/4;max-height:65vh;background:#202943;border-radius:16px;overflow:hidden}
+video{position:absolute;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);opacity:.28;left:0;top:0}
+canvas{position:absolute;width:100%;height:100%;left:0;top:0}
+#hud{display:flex;justify-content:space-between;padding:8px;font-weight:800}
+#msg{min-height:44px;padding:8px;color:#65e6d1;font-weight:700}
+small{color:#aeb6ce}
+</style>
+</head>
+<body><main>
+<h1>⚡ KAMERA REFLEKSİ</h1>
+<p>Telefonu sabit bir yere koyup tüm vücudun görünecek şekilde geriye çekil. İzin verince hareketlerini algılamaya çalışır.</p>
+<div id="hud"><span id="score">Skor: 0</span><span>⬅️ ➡️ 🦘</span></div>
+<div id="stage"><video id="video" playsinline muted></video><canvas id="game" width="360" height="480"></canvas></div>
+<div id="msg">Başlamak için kamerayı aç.</div>
+<button id="start">📸 KAMERAYI AÇ VE OYNA</button>
+<button id="restart">↻ Yeniden başlat</button>
+<p><small>Kamera görüntüsü bu sayfada işlenir. Kamera erişimi için HTTPS üzerinden açılmalıdır. İyi aydınlatma kullan.</small></p>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469402/pose.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js" crossorigin="anonymous"></script>
+<script>
+const video=document.getElementById('video'),canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const msg=document.getElementById('msg'),scoreEl=document.getElementById('score');
+let pose,camera,playing=false,score=0,playerX=180,jump=0,obstacles=[],lastSpawn=0,lastTime=0,bodyX=.5,baseline=null,prevY=null;
+function draw(){
+ const w=canvas.width,h=canvas.height;ctx.clearRect(0,0,w,h);
+ const g=ctx.createLinearGradient(0,0,0,h);g.addColorStop(0,'#202943');g.addColorStop(1,'#090d19');ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
+ ctx.fillStyle='#30384d';ctx.beginPath();ctx.moveTo(90,0);ctx.lineTo(270,0);ctx.lineTo(350,h);ctx.lineTo(10,h);ctx.closePath();ctx.fill();
+ ctx.strokeStyle='#7785a2';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(90,0);ctx.lineTo(10,h);ctx.moveTo(270,0);ctx.lineTo(350,h);ctx.stroke();
+ for(let i=0;i<5;i++){let y=(i*110+(Date.now()/18)%110);ctx.strokeStyle='#56627b';ctx.beginPath();ctx.moveTo(90-y*.16,y);ctx.lineTo(270+y*.16,y);ctx.stroke()}
+ obstacles.forEach(o=>{ctx.font='30px sans-serif';ctx.textAlign='center';ctx.fillText(o.type==='block'?'📦':'🟠',o.x,o.y)});
+ let y=365-jump;ctx.font='42px sans-serif';ctx.textAlign='center';ctx.fillText('🏃',playerX,y);
+}
+function reset(){score=0;playerX=180;jump=0;obstacles=[];lastSpawn=0;scoreEl.textContent='Skor: 0';playing=true;msg.textContent='Hareket et! Sağa-sola kay, zıpla!';lastTime=performance.now();requestAnimationFrame(loop)}
+function loop(t){
+ if(!playing)return;let dt=Math.min(40,t-lastTime);lastTime=t;
+ if(t-lastSpawn>1050){obstacles.push({x:[95,180,265][Math.floor(Math.random()*3)],y:-20,type:Math.random()<.5?'block':'ball'});lastSpawn=t}
+ obstacles.forEach(o=>o.y+=dt*.22);obstacles=obstacles.filter(o=>o.y<520);
+ score++;scoreEl.textContent='Skor: '+score;
+ for(const o of obstacles){if(o.y>325&&o.y<390&&Math.abs(o.x-playerX)<42&&jump<35){playing=false;msg.textContent='💥 Çarptın! Skor: '+score+'. Yeniden başlatabilirsin.';draw();return}}
+ draw();requestAnimationFrame(loop)
+}
+async function startCamera(){
+ try{
+ msg.textContent='Kamera başlatılıyor…'; 
+ pose=new Pose({locateFile:(file)=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469402/${file}`});
+ pose.setOptions({modelComplexity:0,smoothLandmarks:true,enableSegmentation:false,minDetectionConfidence:.5,minTrackingConfidence:.5});
+ pose.onResults(results=>{
+  if(results.poseLandmarks){
+   const lm=results.poseLandmarks,hip=(lm[23].x+lm[24].x)/2, nose=lm[0].y;
+   bodyX=1-hip;playerX=55+bodyX*250;
+   if(baseline===null)baseline=nose;
+   if(prevY!==null&&prevY-nose>.055)jump=85;
+   prevY=nose;if(jump>0)jump=Math.max(0,jump-3);
+   msg.textContent='Seni görüyorum! Sağa-sola hareket et ve zıpla.';
+  }
+ });
+ camera=new Camera(video,{onFrame:async()=>{await pose.send({image:video})},width:640,height:480});
+ await camera.start();reset();
+ }catch(e){msg.textContent='Kamera açılamadı. Sayfayı HTTPS üzerinde aç ve kamera iznini ver.';console.error(e)}
+}
+document.getElementById('start').addEventListener('click',startCamera);
+document.getElementById('restart').addEventListener('click',()=>{if(video.srcObject)reset();else msg.textContent='Önce kamerayı aç.'});
+draw();
+</script></body></html>
